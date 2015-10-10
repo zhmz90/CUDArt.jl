@@ -3,6 +3,15 @@ using Base.Test
 using Compat
 
 #########################
+# Device init and close #
+#########################
+@test length(CUDArt.ptxdict) == 0
+CUDArt.init(0)
+@test in(0, keys(CUDArt.ptxdict))
+CUDArt.close(0)
+@test length(CUDArt.ptxdict) == 0
+
+#########################
 # Test CUDA array types #
 #########################
 result = CUDArt.devices(dev->CUDArt.capability(dev)[1] >= 2, nmax=1) do devlist

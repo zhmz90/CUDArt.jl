@@ -32,10 +32,10 @@ end
 function cudasleep(secs; dev::Integer=device(), stream=null_stream)
     device(dev)
     rate = attribute(dev, rt.cudaDevAttrClockRate)
-    func = ptxdict[(dev, "clock_block")]
+    func = ptxdict[dev].fns["clock_block"]
     twatchdog = 1.95  # watchdog timer kicks in after 2 secs
     while secs > 0
-        tics = @compat(Int64(1000*rate*min(twatchdog, secs)))  # rate is in kHz
+        tics = Int64(1000*rate*min(twatchdog, secs))  # rate is in kHz
         secs -= twatchdog
         launch(func, 1, 1, (tics,), stream=stream)
     end

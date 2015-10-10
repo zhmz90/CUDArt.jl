@@ -1,6 +1,6 @@
-module CUDArt
+isdefined(Base, :__precompile__) && __precompile__()
 
-using Compat
+module CUDArt
 
 export
     # pointer symbols
@@ -18,11 +18,10 @@ export
     Stream, null_stream, cudasleep,
     destroy, free, cudafinalizer
 
+import Base: ==, -, +, getindex, setindex!
 import Base: length, size, ndims, eltype, similar, pointer, stride,
     copy, convert, reinterpret, show, summary,
-    copy!, get!, fill!, wait
-
-import Compat: unsafe_convert
+    copy!, get!, fill!, wait, unsafe_convert
 
 # Prepare the CUDA runtime API bindings
 include("libcudart-6.5.jl")
@@ -52,5 +51,14 @@ include("stream.jl")
 include("pointer.jl")
 include("arrays.jl")
 include("execute.jl")
+
+if isdefined(Base, :__precompile__)
+    include("precompile.jl")
+    _precompile_()
+end
+
+function __init__()
+    c_async_send_cudastream[] = cfunction(async_send_cudastream, Void, (rt.cudaStream_t, rt.cudaError_t, Ptr{Void}))
+end
 
 end

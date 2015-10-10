@@ -1,6 +1,6 @@
-devcount() = (ret = Cint[0]; rt.cudaGetDeviceCount(ret); @compat(Int(ret[1])))
+devcount() = (ret = Cint[0]; rt.cudaGetDeviceCount(ret); Int(ret[1]))
 
-device() = (ret = Cint[0]; rt.cudaGetDevice(ret); @compat(Int(ret[1])))
+device() = (ret = Cint[0]; rt.cudaGetDevice(ret); Int(ret[1]))
 device(dev::Integer) = (rt.cudaSetDevice(dev); dev)
 
 device_reset() = device_reset(device())
@@ -29,12 +29,12 @@ device_synchronize() = rt.cudaDeviceSynchronize()
 
 device_properties(dev::Integer) = (aprop = Array(rt.cudaDeviceProp, 1); rt.cudaGetDeviceProperties(aprop, dev); aprop[1])
 
-attribute(dev::Integer, code::Integer) = (ret = Cint[0]; rt.cudaDeviceGetAttribute(ret, code, dev); @compat(Int(ret[1])))
+attribute(dev::Integer, code::Integer) = (ret = Cint[0]; rt.cudaDeviceGetAttribute(ret, code, dev); Int(ret[1]))
 
 capability(dev::Integer) = (attribute(dev,rt.cudaDevAttrComputeCapabilityMajor),
                             attribute(dev,rt.cudaDevAttrComputeCapabilityMinor))
 
-name(p::rt.cudaDeviceProp) = bytestring(convert(Ptr{Uint8}, pointer([p.name])))
+name(p::rt.cudaDeviceProp) = bytestring(convert(Ptr{UInt8}, pointer([p.name])))
 
 # criteria = dev -> Bool
 function devices(criteria::Function; nmax::Integer = typemax(Int))
@@ -49,49 +49,59 @@ function devices(f::Function, criteria::Function; nmax::Integer = typemax(Int))
     devices(f, devlist)
 end
 
-function devices(f::Function, devlist::Union(Integer,AbstractVector))
+function devices(f::Function, devlist::Union{Integer,AbstractVector})
     local ret
-    mdutils = [CuModule() for i = 1:length(devlist)]
     try
-        init!(mdutils, devlist)
+        init(devlist)
         ret = f(devlist)
     finally
-        close!(mdutils, devlist)
+        close(devlist)
     end
     ret
 end
 
 # A cache of useful CUDA kernels that gets loaded and closed
 # by devices(f, devlist)
-const global ptxdict = Dict()
+immutable PtxUtils
+    mod::CuModule
+    fns::Dict{Any,CuFunction}
+end
+const global ptxdict = Dict{Integer,PtxUtils}()
 
-function init!(mdutils::Array{CuModule}, devlist)
+function init(devlist::Union{Integer,AbstractVector})
     funcnames = ["fill_contiguous", "fill_pitched"]
     funcexts  = ["double","float","int64","uint64","int32","uint32","int16","uint16","int8","uint8"]
-    datatypes = [Float64,Float32,Int64,Uint64,Int32,Uint32,Int16,Uint16,Int8,Uint8]
+    datatypes = [Float64,Float32,Int64,UInt64,Int32,UInt32,Int16,UInt16,Int8,UInt8]
     utilfile  = joinpath(Pkg.dir(), "CUDArt/deps/utils.ptx")
+
     # initialize all devices
-    for idev = 1:length(devlist)
-        dev = devlist[idev]
+    for dev in devlist
+        # It has already been initialized.
+        if haskey(ptxdict, dev)
+            continue
+        end
+
         device(dev)
         # allocate and destroy memory to force initialization
-        free(malloc(Uint8, 1))
-        # Load the utility functions
-        mdutils[idev] = CuModule(utilfile, false)
+        free(malloc(UInt8, 1))
+        # Load the utility functions.
+        ptx = PtxUtils(CuModule(utilfile, false), Dict{Any,CuFunction}())
         for func in funcnames
-            for i = 1:length(funcexts)
-                ptxdict[(dev, func, datatypes[i])] = CuFunction(mdutils[idev], func*"_"*funcexts[i])
+            for (dtype,ext) in zip(datatypes, funcexts)
+                ptx.fns[(func, dtype)] = CuFunction(ptx.mod, func*"_"*ext)
             end
         end
-        ptxdict[(dev, "clock_block")] = CuFunction(mdutils[idev], "clock_block")
+        ptx.fns["clock_block"] = CuFunction(ptx.mod, "clock_block")
+        ptxdict[dev] = ptx
     end
 end
 
-function close!(mdutils::Array{CuModule}, devlist)
-    for idev = 1:length(devlist)
-        if mdutils[idev].handle != C_NULL
-            unload(mdutils[idev])
+function close(devlist::Union{Integer,AbstractVector})
+    for dev in devlist
+        if haskey(ptxdict, dev)
+            unload(ptxdict[dev].mod)
+            delete!(ptxdict, dev)
         end
-        device_reset(devlist[idev])
+        device_reset(dev)
     end
 end
